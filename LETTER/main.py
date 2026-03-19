@@ -112,8 +112,14 @@ def evaluate_rmse(model, dataloader, device):
 
     return total_rmse / len(dataloader), total_mse / len(dataloader), total_mae / len(dataloader)
 
-def save_model(model, path):
-    torch.save(model.state_dict(), path)
+def save_model(model_or_state_dict, path):
+    if isinstance(model_or_state_dict, nn.Module):
+        state_dict = model_or_state_dict.state_dict()
+    elif isinstance(model_or_state_dict, dict):
+        state_dict = model_or_state_dict
+    else:
+        raise TypeError("save_model expects an nn.Module or a state_dict-like dict.")
+    torch.save(state_dict, path)
 
 def load_model(model, path, device):
     model.load_state_dict(torch.load(path, map_location=device))
@@ -212,7 +218,7 @@ def main():
         'test_mse': test_mse,
         'test_mae': test_mae
     }
-    with open(os.path.join(args.output_dir, f'{dataset}_{model_name}_results.json'), 'w') as f:
+    with open(os.path.join(args.output_dir, f'{dataset}_{model_name}_results_{args.seed}.json'), 'w') as f:
         json.dump(results, f, indent=4)
 
 

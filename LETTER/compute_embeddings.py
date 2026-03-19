@@ -43,30 +43,7 @@ def finalize_embeddings(sums: np.ndarray, counts: np.ndarray) -> np.ndarray:
     return embeddings
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Compute user/item embeddings from train interactions."
-    )
-    parser.add_argument("--dataset_csv", required=True, help="Path to CSV dataset.")
-    parser.add_argument("--train_idx", required=True, help="Path to train indices .npy.")
-    parser.add_argument("--user2id", required=True, help="Path to user2id.json.")
-    parser.add_argument("--item2id", required=True, help="Path to item2id.json.")
-    parser.add_argument("--output_dir", required=True, help="Output directory for embeddings.")
-    parser.add_argument(
-        "--model_name",
-        default="sentence-transformers/msmarco-bert-base-dot-v5",
-        help="SentenceTransformer model name or path.",
-    )
-    parser.add_argument(
-        "--rating_threshold",
-        default=3.0,
-        type=float,
-        help="Ratings > threshold are likes; <= are dislikes.",
-    )
-    parser.add_argument("--batch_size", default=64, type=int)
-    parser.add_argument("--device", default=None, help="Device for SentenceTransformer.")
-    args = parser.parse_args()
-
+def main(args) -> None:
     df = pd.read_csv(args.dataset_csv)
     train_idx = load_indices(args.train_idx)
     train_df = df.iloc[train_idx]
@@ -133,4 +110,27 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Compute user/item embeddings from train interactions."
+    )
+    parser.add_argument("--dataset_csv", required=True, help="Path to CSV dataset.")
+    parser.add_argument("--train_idx", required=True, help="Path to train indices .npy.")
+    parser.add_argument("--user2id", required=True, help="Path to user2id.json.")
+    parser.add_argument("--item2id", required=True, help="Path to item2id.json.")
+    parser.add_argument("--output_dir", required=True, help="Output directory for embeddings.")
+    parser.add_argument(
+        "--model_name",
+        default="sentence-transformers/msmarco-bert-base-dot-v5",
+        help="SentenceTransformer model name or path.",
+    )
+    parser.add_argument(
+        "--rating_threshold",
+        default=3.0,
+        type=float,
+        help="Ratings > threshold are likes; <= are dislikes.",
+    )
+    parser.add_argument("--batch_size", default=64, type=int)
+    parser.add_argument("--device", default=None, help="Device for SentenceTransformer.")
+    args = parser.parse_args()
+    
+    main(args)

@@ -1,4 +1,4 @@
-"""MovieLens dataset"""
+
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -14,21 +14,6 @@ sys.path.append("..")
 from load_data import *
 from util import *
 
-
-# _urls = {
-#     'ml-100k' : 'http://files.grouplens.org/datasets/movielens/ml-100k.zip',
-#     'ml-1m' : 'http://files.grouplens.org/datasets/movielens/ml-1m.zip',
-#     'ml-10m' : 'http://files.grouplens.org/datasets/movielens/ml-10m.zip',
-# }
-#
-# READ_DATASET_PATH = get_download_dir()
-# GENRES_ML_100K =\
-#     ['unknown', 'Action', 'Adventure', 'Animation',
-#      'Children', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy',
-#      'Film-Noir', 'Horror', 'Musical', 'Mystery', 'Romance', 'Sci-Fi',
-#      'Thriller', 'War', 'Western']
-# GENRES_ML_1M = GENRES_ML_100K[1:]
-# GENRES_ML_10M = GENRES_ML_100K + ['IMAX']
 
 
 class MovieLens(object):
