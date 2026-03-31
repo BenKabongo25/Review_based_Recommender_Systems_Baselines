@@ -7,13 +7,8 @@ import torch as th
 import dgl
 import sys
 
-sys.path.append("..")
-
-# from load_data import load_sentiment_data, \
-#     load_data_for_review_based_rating_prediction
 from load_data import *
 from util import *
-
 
 
 class MovieLens(object):
@@ -72,22 +67,6 @@ class MovieLens(object):
 
         self.user_feature = None
         self.movie_feature = None
-
-        # Generate features
-        # if review_fea_size == 0:
-        #     self.user_feature = None
-        #     self.movie_feature = None
-        #     # self.user_feature_groupby_rating = {i: None for i in self.possible_rating_values}
-        #     # self.movie_feature_groupby_rating = {i: None for i in self.possible_rating_values}
-        # else:
-        #     # if mix_cpu_gpu, we put features in CPU
-        #     self.user_feature, self.movie_feature = self._process_user_item_review_feat()
-        #     # self.user_feature_groupby_rating, self.movie_feature_groupby_rating = self._process_user_item_review_feat_groupby_rating()
-        #     if not mix_cpu_gpu:
-        #         self.user_feature = self.user_feature.to(self._device)
-        #         self.movie_feature = self.movie_feature.to(self._device)
-        #         # self.user_feature_groupby_rating = {k: v.to(self._device) for k, v in self.user_feature_groupby_rating.items()}
-        #         # self.movie_feature_groupby_rating = {k: v.to(self._device) for k, v in self.movie_feature_groupby_rating.items()}
 
         self.user_feature_shape = (self.num_user, self.num_user)
         self.movie_feature_shape = (self.num_movie, self.num_movie)
@@ -164,22 +143,6 @@ class MovieLens(object):
             self.test_dec_graph.number_of_nodes('user'),
             self.test_dec_graph.number_of_nodes('movie'),
             self.test_dec_graph.number_of_edges()))
-
-    # def _process_user_item_review_feat(self):
-    #     user_list = [[] for _ in range(self._num_user)]
-    #     movie_list = [[] for _ in range(self._num_movie)]
-    #     for k, v in self.train_review_feat.items():
-    #         u, m = k
-    #         user_list[u].append(v)
-    #         movie_list[m].append(v)
-    #     user_list = [torch.stack(x).mean(0) for x in user_list]
-    #     movie_list = [torch.stack(x).mean(0) for x in movie_list]
-    #
-    #     user_list = torch.stack(user_list).to(torch.float32)
-    #     movie_list = torch.stack(movie_list).to(torch.float32)
-    #     user_list.requires_grad = True
-    #     movie_list.requires_grad = True
-    #     return user_list, movie_list
 
     def _process_user_item_review_feat_groupby_rating(self):
 
@@ -349,34 +312,6 @@ class MovieLens(object):
     @property
     def num_movie(self):
         return self._num_movie
-
-    @staticmethod
-    def load_ml100k(dataset_path):
-        train_path = '/home/d1/shuaijie/data/ml-100k/u1.base'
-        test_path = '/home/d1/shuaijie/data/ml-100k/u1.test'
-        valid_ratio = 0.1
-        train = pd.read_csv(
-            train_path, sep='\t', header=None,
-            names=['user_id', 'item_id', 'rating', 'timestamp'],
-            dtype={'user_id': np.int64, 'item_id': np.int64,
-                   'ratings': np.float32, 'timestamp': np.int64},
-            engine='python')
-        user_size = train['user_id'].max() + 1
-        item_size = train['item_id'].max() + 1
-        dataset_info = {'user_size': user_size, 'item_size': item_size}
-        test = pd.read_csv(
-            test_path, sep='\t', header=None,
-            names=['user_id', 'item_id', 'rating', 'timestamp'],
-            dtype={'user_id': np.int64, 'item_id': np.int64,
-                   'ratings': np.float32, 'timestamp': np.int64},
-            engine='python')
-        num_valid = int(
-            np.ceil(train.shape[0] * valid_ratio))
-        shuffled_idx = np.random.permutation(train.shape[0])
-        valid = train.iloc[shuffled_idx[: num_valid]]
-        train = train.iloc[shuffled_idx[num_valid:]]
-
-        return train, valid, test, None, None, dataset_info
 
 
 def process_doc(doc, word2id, doc_length=256):

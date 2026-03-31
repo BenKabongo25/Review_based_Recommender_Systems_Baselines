@@ -214,9 +214,9 @@ def main():
     test_rmse, test_mse, test_mae = evaluate_rmse(model, test_loader, device)
     print(f'Test RMSE: {test_rmse:.4f}, MSE: {test_mse:.4f}, MAE: {test_mae:.4f}')
     results = {
-        'test_rmse': test_rmse,
-        'test_mse': test_mse,
-        'test_mae': test_mae
+        'rmse': test_rmse,
+        'mse': test_mse,
+        'mae': test_mae
     }
     with open(os.path.join(args.output_dir, f'{dataset}_{model_name}_results_{args.seed}.json'), 'w') as f:
         json.dump(results, f, indent=4)
