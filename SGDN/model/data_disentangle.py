@@ -7,31 +7,13 @@ import torch as th
 import dgl
 import sys
 import torch.nn.functional as F
-from torch_scatter import scatter_max, scatter
 import faiss
 
 sys.path.append("..")
-
-# from load_data import load_sentiment_data, \
-#     load_data_for_review_based_rating_prediction
 from load_data import *
 from util import *
 from pretrain_review import pretrain_review_feat
 
-# _urls = {
-#     'ml-100k' : 'http://files.grouplens.org/datasets/movielens/ml-100k.zip',
-#     'ml-1m' : 'http://files.grouplens.org/datasets/movielens/ml-1m.zip',
-#     'ml-10m' : 'http://files.grouplens.org/datasets/movielens/ml-10m.zip',
-# }
-#
-# READ_DATASET_PATH = get_download_dir()
-# GENRES_ML_100K =\
-#     ['unknown', 'Action', 'Adventure', 'Animation',
-#      'Children', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy',
-#      'Film-Noir', 'Horror', 'Musical', 'Mystery', 'Romance', 'Sci-Fi',
-#      'Thriller', 'War', 'Western']
-# GENRES_ML_1M = GENRES_ML_100K[1:]
-# GENRES_ML_10M = GENRES_ML_100K + ['IMAX']
 
 
 class MovieLens(object):
@@ -99,29 +81,8 @@ class MovieLens(object):
         self._symm = symm
         self.num_factor = num_factor
         self.dataset_name = dataset_name
-
-        # TextCNN
-        # review_feat_path = \
-        #     f'../checkpoint/{dataset_name}/TextCNN-Rating/train_review_feature_dim_{review_fea_size}.pkl'
-
-        # DeepCoNN_add_Duv
-        # review_feat_path = \
-        #     f'../checkpoint/{dataset_name}/DeepCoNN_add_Duv/review_feature_dim_{review_fea_size}.pkl'
-
-        # GCMC_add_Duv
-        # review_feat_path = \
-        #     f'../checkpoint/{dataset_name}/GCMC-Add-Duv/GCMC-Add-Duv_dim_{review_fea_size}_feat.pkl'
-
-        # BERT-Whitening
-        # if review_fea_size == 256:
-        #     review_feat_path = \
-        #         f'../checkpoint/{dataset_name}/BERT-Whitening/bert-base-uncased_sentence_vectors.pkl'
-        # else:
-        #     review_feat_path = \
-        #         f'../checkpoint/{dataset_name}/BERT-Whitening/bert-base-uncased_sentence_vectors_dim_{review_fea_size}.pkl'
         review_feat_path = \
             f'../checkpoint/{dataset_name}/BERT-Whitening/bert-base-uncased_sentence_vectors_dim_{review_fea_size}.pkl'
-
 
         try:
             self.train_review_feat = torch.load(review_feat_path)
@@ -129,15 +90,7 @@ class MovieLens(object):
             self.train_review_feat = None
             print(f'Load pretrained review feature fail! feature size:{review_fea_size}')
 
-
-
-
-        if 'ml-100k' in dataset_path:
-            sent_train_data, sent_valid_data, sent_test_data, _, _, dataset_info = \
-                self.load_ml100k(dataset_path)
-        else:
-            sent_train_data, sent_valid_data, sent_test_data, _, _, dataset_info = \
-                load_sentiment_data(dataset_path)
+        sent_train_data, sent_valid_data, sent_test_data, _, _, dataset_info = load_sentiment_data(dataset_path)
 
         if use_user_item_doc:
             doc_data = load_data_for_review_based_rating_prediction(dataset_path)
@@ -177,38 +130,18 @@ class MovieLens(object):
         self._num_user = dataset_info['user_size']
         self._num_movie = dataset_info['item_size']
         self.num_rating = dataset_info['train_size']
-        # self.rating_split = [dataset_info['rating_count'][rating] for rating in dataset_info['rating_count']]
 
-
-
-        # added by me
         train_ui = list(zip(self.train_datas[0], self.train_datas[1]))
         train_feat = [self.train_review_feat[x].unsqueeze(0) for x in train_ui]
-        # train_feat = torch.cat(train_feat, dim=0).to(device)
-        # sim = torch.matmul(train_feat, train_feat.T)
-        # value, indice = torch.topk(sim, k=10)
 
         test_ui = list(zip(self.test_datas[0], self.test_datas[1]))
         test_feat = [self.train_review_feat[x] for x in test_ui]
 
-        # self.pretrain_review_feat = pretrain_review_feat(train_feat, test_feat,  self.train_datas[2], self.test_datas[2])
-        # for i, x in enumerate(train_ui):
-        #     self.train_review_feat[x] = self.pretrain_review_feat[i]
-        # self.train_feat = train_feat
-        # end added by me
-
-
-
         self.user_feature = None
         self.movie_feature = None
 
-
-
         self.user_feature_shape = (self.num_user, self.num_user)
         self.movie_feature_shape = (self.num_movie, self.num_movie)
-
-        # self.user_feature_shape = (self.num_user, self.num_user)
-        # self.movie_feature_shape = (self.num_movie, self.num_movie)
 
         info_line = "Feature dim: "
         info_line += "\nuser: {}".format(self.user_feature_shape)
@@ -221,9 +154,6 @@ class MovieLens(object):
         test_rating_pairs, test_rating_values = self._generate_pair_value('test')
 
         def _make_labels(ratings):
-            """
-            不同rating值对应id
-            """
             labels = th.LongTensor(
                 np.searchsorted(self.possible_rating_values, ratings)).to(
                 device)
@@ -287,7 +217,6 @@ class MovieLens(object):
 
 
     def _process_user_item_review_feat_groupby_rating(self):
-
         user_id = self.train_datas[0]
         item_id = self.train_datas[1]
         rating = self.train_datas[2]
@@ -459,20 +388,12 @@ class MovieLens(object):
         g = dgl.heterograph({('user', 'rate', 'movie'): g.edges()},
                             num_nodes_dict={'user': self.num_user,
                                             'movie': self.num_movie})
-        # e_fea = th.Tensor(rating_pairs).T
-        # g.edata['review_feat'] = e_fea
-        # g.edata['u_id'] = torch.IntTensor(rating_pairs[0].tolist())
-        # g.edata['i_id'] = torch.IntTensor(rating_pairs[1].tolist())
 
         if review_feat is not None:
             ui = list(zip(rating_pairs[0].tolist(), rating_pairs[1].tolist()))
             feat = [review_feat[x] for x in ui]
             feat = torch.stack(feat, dim=0).float()
             g.edata['review_feat'] = feat
-
-        # if self.user_doc is not None:
-        #     g.nodes['user'].data['doc'] = self.user_doc
-        #     g.nodes['movie'].data['doc'] = self.movie_doc
 
         return g
     def _generate_dec_subgraphs(self, test_rating_pairs, test_rating_values, review_feat=None):

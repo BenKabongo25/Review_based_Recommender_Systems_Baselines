@@ -3,13 +3,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class Model(nn.Module):
+class LETTER(nn.Module):
 
     def __init__(
         self, num_users, num_items, embedding_dim, hidden_dim, 
         CL, aa, reviews, ratings, edge_ratio, device
     ):
-        super(Model, self).__init__()
+        super(LETTER, self).__init__()
         self.user_embedding = nn.Embedding(num_users, embedding_dim)
         self.item_embedding = nn.Embedding(num_items, embedding_dim)
         self.user_pos_embedding = nn.Embedding(num_users, embedding_dim)

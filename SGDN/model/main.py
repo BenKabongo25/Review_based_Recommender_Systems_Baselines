@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import argparse
 import math
 import random
@@ -7,7 +5,6 @@ import string
 from abc import ABC
 
 import torch
-import torch as th
 from torch.nn import init
 
 from data_disentangle import MovieLens
@@ -18,60 +15,6 @@ from util import *
 import torch.nn.functional as F
 from torch_scatter import scatter_max, scatter
 import faiss
-
-def config():
-    parser = argparse.ArgumentParser(description='RGC')
-    parser.add_argument('--device', default='0', type=int,
-                        help='Running device. E.g `--device 0`, if using cpu, set `--device -1`')
-    parser.add_argument('--model_save_path', type=str, help='The model saving path')
-    parser.add_argument('--model_activation', type=str, default="leaky")
-    parser.add_argument('--review_feat_size', type=int, default=64)
-    parser.add_argument('--gcn_agg_norm_symm', type=bool, default=True)
-    parser.add_argument('--gcn_agg_accum', type=str, default="sum")
-    parser.add_argument('--batch_size', type=int, default=2048)
-    parser.add_argument('--gcn_dropout', type=float, default=0.8)
-    parser.add_argument('--train_max_iter', type=int, default=2000)
-    parser.add_argument('--train_log_interval', type=int, default=1)
-    parser.add_argument('--train_valid_interval', type=int, default=1)
-    parser.add_argument('--train_optimizer', type=str, default="Adam")
-    parser.add_argument('--train_grad_clip', type=float, default=1.0)
-    parser.add_argument('--train_lr', type=float, default=0.01)
-    parser.add_argument('--train_min_lr', type=float, default=0.001)
-    parser.add_argument('--train_lr_decay_factor', type=float, default=0.5)
-    parser.add_argument('--train_decay_patience', type=int, default=50)
-    parser.add_argument('--train_early_stopping_patience', type=int, default=100)
-    parser.add_argument('--share_param', default=False, action='store_true')
-    parser.add_argument('--train_classification', type=bool, default=False)
-    parser.add_argument('--num_factor', type=int, default=2)
-    parser.add_argument('--num_layer', type=int, default=1)
-    parser.add_argument('--num_pos', type=int, default=10)
-    parser.add_argument('--lamda', type=float, default=0.005)
-
-
-    args = parser.parse_args()
-    args.model_short_name = 'SGDN'
-
-    args.dataset_name = 'Office_Products_5'
-    args.dataset_path = '/home/ryy/code/GNN/ReviewGraph/data/' + args.dataset_name + '/' + args.dataset_name + '.json'
-    args.train_max_iter = 2000
-
-
-    args.device = th.device(args.device) if args.device >= 0 else th.device('cpu')
-
-    # configure save_fir to save all the info
-    if args.model_save_path is None:
-        args.model_save_path = 'log/' \
-                               + args.model_short_name \
-                               + '_' + args.dataset_name \
-                               + '_' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=2)) \
-                               + '.pkl'
-    if not os.path.isdir('log'):
-        os.makedirs('log')
-
-    args.gcn_agg_units = args.review_feat_size*1
-    args.gcn_out_units = args.review_feat_size*1
-
-    return args
 
 
 class GCMCGraphConv(nn.Module, ABC):
@@ -302,7 +245,7 @@ class MLPPredictor(nn.Module, ABC):
         h_u = edges.src['h']
         h_v = edges.dst['h']
         if self.num_factor==1:
-            h_fea = self.linear(th.cat([h_u, h_v], dim=1))
+            h_fea = self.linear(torch.cat([h_u, h_v], dim=1))
             score = self.predictor(h_fea)
             return {'score': score, 'feat': h_fea}
         h_u, h_v = h_u.view(h_u.shape[0], self.num_factor, -1), h_v.view(h_v.shape[0], self.num_factor, -1)
@@ -365,11 +308,11 @@ class Net(nn.Module, ABC):
         self.ifeats = nn.ParameterDict()
         for r in range(len(self.rating_vals)):
             for k in range(self.num_factor):
-                self.ufeats[str(r*len(self.rating_vals)+k)] = nn.Parameter(th.Tensor(num_user, params.gcn_out_units//self.num_factor))
+                self.ufeats[str(r*len(self.rating_vals)+k)] = nn.Parameter(torch.Tensor(num_user, params.gcn_out_units//self.num_factor))
         for r in range(len(self.rating_vals)):
             for k in range(self.num_factor):
-                self.ifeats[str(r*len(self.rating_vals)+k)] = nn.Parameter(th.Tensor(num_item, params.gcn_out_units//self.num_factor))
-        self.prototypes = nn.Parameter(th.Tensor(self.num_factor, params.review_feat_size)).to(params.device)
+                self.ifeats[str(r*len(self.rating_vals)+k)] = nn.Parameter(torch.Tensor(num_item, params.gcn_out_units//self.num_factor))
+        self.prototypes = nn.Parameter(torch.Tensor(self.num_factor, params.review_feat_size)).to(params.device)
         self.init_prot(review_feat_dic)
         self.rfcs = [nn.Linear(params.review_feat_size, params.review_feat_size).to(params.device) for _ in range(self.num_factor)]
         for i, fc in enumerate(self.rfcs):
@@ -492,7 +435,7 @@ class Net(nn.Module, ABC):
 
 def evaluate(args, net, dataset, segment='valid'):
     possible_rating_values = dataset.possible_rating_values
-    nd_possible_rating_values = th.FloatTensor(possible_rating_values).to(args.device)
+    nd_possible_rating_values = torch.FloatTensor(possible_rating_values).to(args.device)
 
     if segment == "valid":
         rating_values = dataset.valid_truths
@@ -507,19 +450,21 @@ def evaluate(args, net, dataset, segment='valid'):
     else:
         raise NotImplementedError
 
-    # Evaluate RMSE
     net.eval()
-    with th.no_grad():
+    with torch.no_grad():
         pred_ratings, _,_, _, _, _, _ = net(enc_graph, dec_graph,
                            dataset.review_data_dict, save_graph=False)
         if args.train_classification:
-            real_pred_ratings = (th.softmax(pred_ratings, dim=1) *
+            real_pred_ratings = (torch.softmax(pred_ratings, dim=1) *
                                  nd_possible_rating_values.view(1, -1)).sum(dim=1)
-            rmse = ((real_pred_ratings - rating_values) ** 2.).mean().item()
+            mse = ((real_pred_ratings - rating_values) ** 2.).mean().item()
+            mae = (real_pred_ratings - rating_values).abs().mean().item()
         else:
-            rmse = ((pred_ratings - rating_values) ** 2.).mean().item()
-        rmse = np.sqrt(rmse)
-    return rmse
+            mse = ((pred_ratings - rating_values) ** 2.).mean().item()
+            mae = (pred_ratings - rating_values).abs().mean().item()
+        rmse = np.sqrt(mse)
+
+    return rmse, mse, mae
 
 
 def train(params):
@@ -540,7 +485,7 @@ def train(params):
     net = Net(params, dataset.num_user, dataset.num_movie, dataset.review_data_dict, dataset.num_rating, dataset.rating_split)
     net = net.to(params.device)
 
-    nd_possible_rating_values = th.FloatTensor(dataset.possible_rating_values).to(params.device)
+    nd_possible_rating_values = torch.FloatTensor(dataset.possible_rating_values).to(params.device)
     rating_loss_net = nn.CrossEntropyLoss() if params.train_classification else nn.MSELoss()
     learning_rate = params.train_lr
     optimizer = get_optimizer(params.train_optimizer)(net.parameters(), lr=learning_rate)
@@ -589,13 +534,13 @@ def train(params):
         optimizer.step()
 
         if params.train_classification:
-            real_pred_ratings = (th.softmax(pred_ratings1, dim=1) * nd_possible_rating_values.view(1, -1)).sum(dim=1)
+            real_pred_ratings = (torch.softmax(pred_ratings1, dim=1) * nd_possible_rating_values.view(1, -1)).sum(dim=1)
         else:
             real_pred_ratings = pred_ratings1
 
         train_rmse = ((real_pred_ratings - train_gt_ratings) ** 2).mean().sqrt()
 
-        valid_rmse = evaluate(args=params, net=net, dataset=dataset, segment='valid')
+        valid_rmse, _, _ = evaluate(args=params, net=net, dataset=dataset, segment='valid')
         logging_str = f"Iter={iter_idx:>3d}, " \
                       f"Train_RMSE={train_rmse:.4f}, Valid_RMSE={valid_rmse:.4f},  Train_loss={loss:.4f}, "
 
@@ -603,7 +548,7 @@ def train(params):
             best_valid_rmse = valid_rmse
             no_better_valid = 0
             best_iter = iter_idx
-            test_rmse = evaluate(args=params, net=net, dataset=dataset, segment='test')
+            test_rmse, _, _ = evaluate(args=params, net=net, dataset=dataset, segment='test')
 
             test_rmse = test_rmse * test_rmse
             best_test_rmse = test_rmse
@@ -628,5 +573,55 @@ def train(params):
 
 
 if __name__ == '__main__':
-    config_args = config()
-    train(config_args)
+    parser = argparse.ArgumentParser(description='RGC')
+    parser.add_argument('--device', default='0', type=int,
+                        help='Running device. E.g `--device 0`, if using cpu, set `--device -1`')
+    parser.add_argument('--model_save_path', type=str, help='The model saving path')
+    parser.add_argument('--model_activation', type=str, default="leaky")
+    parser.add_argument('--review_feat_size', type=int, default=64)
+    parser.add_argument('--gcn_agg_norm_symm', type=bool, default=True)
+    parser.add_argument('--gcn_agg_accum', type=str, default="sum")
+    parser.add_argument('--batch_size', type=int, default=2048)
+    parser.add_argument('--gcn_dropout', type=float, default=0.8)
+    parser.add_argument('--train_max_iter', type=int, default=2000)
+    parser.add_argument('--train_log_interval', type=int, default=1)
+    parser.add_argument('--train_valid_interval', type=int, default=1)
+    parser.add_argument('--train_optimizer', type=str, default="Adam")
+    parser.add_argument('--train_grad_clip', type=float, default=1.0)
+    parser.add_argument('--train_lr', type=float, default=0.01)
+    parser.add_argument('--train_min_lr', type=float, default=0.001)
+    parser.add_argument('--train_lr_decay_factor', type=float, default=0.5)
+    parser.add_argument('--train_decay_patience', type=int, default=50)
+    parser.add_argument('--train_early_stopping_patience', type=int, default=100)
+    parser.add_argument('--share_param', default=False, action='store_true')
+    parser.add_argument('--train_classification', type=bool, default=False)
+    parser.add_argument('--num_factor', type=int, default=2)
+    parser.add_argument('--num_layer', type=int, default=1)
+    parser.add_argument('--num_pos', type=int, default=10)
+    parser.add_argument('--lamda', type=float, default=0.005)
+
+
+    args = parser.parse_args()
+    args.model_short_name = 'SGDN'
+
+    args.dataset_name = 'Office_Products_5'
+    args.dataset_path = '/home/ryy/code/GNN/ReviewGraph/data/' + args.dataset_name + '/' + args.dataset_name + '.json'
+    args.train_max_iter = 2000
+
+
+    args.device = torch.device(args.device) if args.device >= 0 else torch.device('cpu')
+
+    # configure save_fir to save all the info
+    if args.model_save_path is None:
+        args.model_save_path = 'log/' \
+                               + args.model_short_name \
+                               + '_' + args.dataset_name \
+                               + '_' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=2)) \
+                               + '.pkl'
+    if not os.path.isdir('log'):
+        os.makedirs('log')
+
+    args.gcn_agg_units = args.review_feat_size*1
+    args.gcn_out_units = args.review_feat_size*1
+
+    train(args)
