@@ -29,11 +29,12 @@ def evaluate(params, model, dataset, segment="valid"):
 
     model.eval()
     with torch.no_grad():
-        pred_ratings, _, _, _ = model(
+        pred_ratings, _, _ = model(
             enc_graph,
             dec_graph,
             dataset.user_feature,
             dataset.item_feature,
+            cal_edge_mi=False,
         )
         mse = ((pred_ratings - rating_values) ** 2.0).mean().item()
         rmse = np.sqrt(mse)
@@ -166,24 +167,8 @@ def main(params):
         )
 
 
-def parse_device(device_arg: str) -> torch.device:
-    if device_arg == "cpu":
-        return torch.device("cpu")
-    try:
-        device_idx = int(device_arg)
-        if device_idx == -1:
-            return torch.device("cpu")
-        if device_idx >= 0:
-            return torch.device(f"cuda:{device_idx}")
-    except ValueError:
-        pass
-    return torch.device(device_arg)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RGCL")
-    parser.add_argument("--device", type=str, default="0", help="Device: '-1'/'cpu' for CPU, '0' or 'cuda:0' for GPU.")
-    parser.add_argument("--model_save_path", type=str, help="The model saving path")
 
     parser.add_argument("--dataset_name", type=str, required=True, help="dataset name")
     parser.add_argument("--dataset_csv", required=True, help="Path to CSV dataset.")
@@ -208,6 +193,8 @@ if __name__ == "__main__":
     parser.add_argument("--ed_alpha", type=float, default=1.0)
     parser.add_argument("--nd_alpha", type=float, default=0.3)
 
+    parser.add_argument("--device", type=str, default="cuda")
+
     args = parser.parse_args()
     args.model_short_name = "RGCL"
 
@@ -219,11 +206,9 @@ if __name__ == "__main__":
     
     os.makedirs(args.output_dir, exist_ok=True)
 
-    args.device = parse_device(args.device)
+    args.device = torch.device("cuda" if torch.cuda.is_available() and args.device != "cpu" else "cpu")
 
-    if args.model_save_path is None:
-        args.model_save_path = os.path.join(args.output_dir, f"{args.dataset_name}_{args.model_short_name}_{args.seed}.pth")
-
+    args.model_save_path = os.path.join(args.output_dir, f"{args.dataset_name}_{args.model_short_name}_{args.seed}.pth")
     args.gcn_agg_units = args.review_feat_size
     args.gcn_out_units = args.review_feat_size
 

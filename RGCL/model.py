@@ -187,9 +187,9 @@ class MLPPredictorMI(nn.Module):
         graph.nodes['user'].data['h'] = ufeat
         graph.nodes['item'].data['h'] = ifeat
 
-        if ('review_feat' in graph.edata) & cal_edge_mi:
+        if ('review_feat' in graph.edata) and cal_edge_mi:
             graph.edata['neg_review_feat'] = self.neg_sampling(graph)
-        else:
+        elif 'neg_review_feat' in graph.edata:
             del graph.edata['neg_review_feat']
 
         with graph.local_scope():
@@ -211,20 +211,12 @@ class RGCL(nn.Module):
                                  dropout_rate=params.gcn_dropout,
                                  device=params.device)
 
-        if params.train_classification:
-            self.decoder = MLPPredictorMI(in_units=params.gcn_out_units,
-                                        num_classes=len(params.rating_vals))
-        else: 
-            self.decoder = MLPPredictorMI(in_units=params.gcn_out_units,
-                                        num_classes=1)
+        self.decoder = MLPPredictorMI(in_units=params.gcn_out_units,
+                                      num_classes=1)
         self.contrast_loss = ContrastLoss(params.gcn_out_units)
 
     def forward(self, enc_graph, dec_graph, ufeat, ifeat, cal_edge_mi=True):
-
         user_out, item_out = self.encoder(enc_graph, ufeat, ifeat)
-        if self._params.distributed:
-            user_out = user_out.to(self._params.device)
-            item_out = item_out.to(self._params.device)
 
         if cal_edge_mi:
             pred_ratings, mi_score = self.decoder(dec_graph, user_out, item_out, cal_edge_mi)

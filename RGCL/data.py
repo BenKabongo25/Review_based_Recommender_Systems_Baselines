@@ -99,7 +99,7 @@ class RGCLDataset:
         self.valid_dec_graph = self._generate_dec_graph(
             valid_rating_pairs,
             valid_ui_raw,
-            review_feat=self.train_review_feat,
+            review_feat=None,
         )
         self.valid_labels = _make_labels(valid_rating_values)
         self.valid_truths = torch.FloatTensor(valid_rating_values).to(device)
@@ -108,7 +108,7 @@ class RGCLDataset:
         self.test_dec_graph = self._generate_dec_graph(
             test_rating_pairs,
             test_ui_raw,
-            review_feat=self.train_review_feat,
+            review_feat=None,
         )
         self.test_labels = _make_labels(test_rating_values)
         self.test_truths = torch.FloatTensor(test_rating_values).to(device)
