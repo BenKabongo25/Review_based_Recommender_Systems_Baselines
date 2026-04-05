@@ -1,7 +1,6 @@
 import dgl
 import dgl.function as fn
 import dgl.nn.pytorch as dglnn
-import faiss
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,6 +42,7 @@ class GCMCGraphConv(nn.Module):
                  out_feats,
                  k,
                  num_factor,
+                 rating_name_to_idx,
                  device=None,
                  dropout_rate=0.0):
         super(GCMCGraphConv, self).__init__()
@@ -50,6 +50,7 @@ class GCMCGraphConv(nn.Module):
         self._out_feats = out_feats
         self.k = k
         self.device = device
+        self.rating_name_to_idx = rating_name_to_idx
 
         self.dropout = nn.Dropout(dropout_rate)
         self.review_w = nn.Linear(self._out_feats*num_factor, 64//num_factor, bias=False)
@@ -63,10 +64,9 @@ class GCMCGraphConv(nn.Module):
     def forward(self, graph, feat, weight=None):
         with graph.local_scope():
             e = graph.canonical_etypes[0][1]
-            if len(e)>1:
-                s = 'h_' + e[-1]
-            else:
-                s = 'h_' + e[-1]
+            rating_name = e[4:] if e.startswith('rev-') else e
+            rating_idx = self.rating_name_to_idx[rating_name]
+            s = 'h_' + str(rating_idx + 1)
             graph.srcdata['h'] = self.node_w(feat[0][s])
             review_feat = graph.edata['review_feat']
             graph.edata['rf'] = self.review_w(review_feat)
@@ -104,7 +104,10 @@ class GCMCLayer(nn.Module):
         self.num_item = item_in_units
         self.num_factor = num_factor
         self.num_rating = num_rating
-        self.eta = nn.Parameter(torch.FloatTensor(self.rating_vals[-1], self.num_rating))
+        self.rating_name_to_idx = {
+            to_etype_name(r): idx for idx, r in enumerate(self.rating_vals)
+        }
+        self.eta = nn.Parameter(torch.FloatTensor(len(self.rating_vals), self.num_rating))
 
         for rating in rating_vals:
             rating = to_etype_name(rating)
@@ -114,12 +117,14 @@ class GCMCLayer(nn.Module):
                                              msg_units,
                                              k,
                                              num_factor,
+                                             self.rating_name_to_idx,
                                              device=device,
                                              dropout_rate=dropout_rate)
             sub_conv[rev_rating] = GCMCGraphConv(item_in_units,
                                                  msg_units,
                                                  k,
                                                  num_factor,
+                                                 self.rating_name_to_idx,
                                                  device=device,
                                                  dropout_rate=dropout_rate)
 
@@ -140,8 +145,9 @@ class GCMCLayer(nn.Module):
         num_user, num_item = self.num_user, self.num_item
         norm_user_sum, norm_item_sum = torch.zeros(num_user).to(self.device), torch.zeros(num_item).to(self.device)
         for u, e, v in graph.canonical_etypes:
-            e_s, e_sum = 'h_' + e[-1], 'h_sum' + e[-1]
-            rating = int(e[-1])-1
+            rating_name = e[4:] if e.startswith('rev-') else e
+            rating = self.rating_name_to_idx[rating_name]
+            e_s, e_sum = 'h_' + str(rating + 1), 'h_sum' + str(rating + 1)
             row, col = graph[(u, e, v)].edges()[0].to(torch.int64), graph[(u, e, v)].edges()[1].to(torch.int64)
             row_feat, col_feat = F.normalize(feat_dic[self.k][u][e_s][row], dim=1), F.normalize(feat_dic[self.k][v][e_s][col], dim=1)
             row_all = feat_dic[u][e_sum][row]
@@ -150,8 +156,8 @@ class GCMCLayer(nn.Module):
             sim_all = (row_all*col_all).sum(2) / tau
             exp_sim = torch.exp(sim_k) / torch.exp(sim_all).sum(1)
 
-            review_feat_all = review_feat_dic[e[-1]]
-            review_feat = review_feat_dic[e[-1]][:, self.k, :]
+            review_feat_all = review_feat_dic[rating_name]
+            review_feat = review_feat_dic[rating_name][:, self.k, :]
             graph.edges[e].data['review_feat'] = review_feat
             prototypes = prototypes_all
             anchor_dot_k = torch.matmul(review_feat, prototypes[self.k]) / tau
@@ -284,6 +290,9 @@ class SGDN(nn.Module):
         self.num_item = num_item
         self.num_rating = num_rating
         self.rating_vals = params.rating_vals
+        self.rating_name_to_idx = {
+            to_etype_name(r): idx for idx, r in enumerate(self.rating_vals)
+        }
         self.rating_split = rating_split
         self.dim = params.gcn_out_units
         self.device = params.device
@@ -329,20 +338,63 @@ class SGDN(nn.Module):
         self.reset_parameters()
 
     def init_prot(self, review_feat_dic):
-        prototypes, reviews = [], []
+        reviews = []
         for rating in self.rating_vals:
             rating = to_etype_name(rating)
             review_feat = review_feat_dic[rating]
             reviews.append(review_feat)
-        review_feat = torch.cat(reviews, dim=0).detach().cpu().numpy()
-        kmeans = faiss.Kmeans(d=self.dim, k=self.num_factor, gpu=False)
-        kmeans.train(review_feat)
-        cluster_cents = kmeans.centroids
+        review_feat = torch.cat(reviews, dim=0).detach().to(torch.float32)
 
-        _, I = kmeans.index.search(review_feat, 1)
-        centroids = torch.Tensor(cluster_cents).to(self.device)
+        centroids = None
+        faiss_mod = None
+        try:
+            import faiss as faiss_mod  # type: ignore
+        except Exception:
+            faiss_mod = None
+
+        if faiss_mod is not None:
+            try:
+                review_np = review_feat.cpu().numpy()
+                kmeans = faiss_mod.Kmeans(d=self.dim, k=self.num_factor, gpu=False)
+                kmeans.train(review_np)
+                centroids = torch.tensor(kmeans.centroids, dtype=torch.float32, device=self.device)
+            except Exception:
+                centroids = None
+
+        if centroids is None:
+            centroids, _ = self._torch_kmeans(review_feat.to(self.device), self.num_factor, n_iter=30)
+
         centroids = F.normalize(centroids, p=2, dim=1)
         self.prototypes.data = centroids
+
+    @staticmethod
+    def _torch_kmeans(x, k, n_iter=30):
+        """Fallback K-Means"""
+        n = x.shape[0]
+        if n < k:
+            raise ValueError(f"Number of points ({n}) must be >= number of clusters ({k}).")
+
+        perm = torch.randperm(n, device=x.device)
+        centroids = x[perm[:k]].clone()
+
+        for _ in range(n_iter):
+            dist = torch.cdist(x, centroids, p=2)
+            labels = torch.argmin(dist, dim=1)
+            new_centroids = []
+            for cid in range(k):
+                mask = labels == cid
+                if torch.any(mask):
+                    new_centroids.append(x[mask].mean(dim=0))
+                else:
+                    new_centroids.append(x[torch.randint(0, n, (1,), device=x.device)].squeeze(0))
+            new_centroids = torch.stack(new_centroids, dim=0)
+
+            if torch.allclose(new_centroids, centroids, atol=1e-4):
+                centroids = new_centroids
+                break
+            centroids = new_centroids
+
+        return centroids, labels
 
     def reset_parameters(self):
         for r in range(len(self.rating_vals)):
@@ -365,7 +417,8 @@ class SGDN(nn.Module):
             dic = {'user': {}, 'item': {}}
 
             for u, e, v in graph.canonical_etypes:
-                rating = int(e[-1]) - 1
+                rating_name = e[4:] if e.startswith('rev-') else e
+                rating = self.rating_name_to_idx[rating_name]
                 if u == 'user':
                     s = 'h_' + str(rating+1)
                     if l == 0:

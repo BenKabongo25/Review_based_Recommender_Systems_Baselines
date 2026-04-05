@@ -145,7 +145,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", required=True, help="Output directory for embeddings.")
     parser.add_argument("--pretrained_weight_shortcut", type=str, default="bert-base-uncased")
     parser.add_argument("--model_short_name", type=str, default="BERT-Whitening")
-    parser.add_argument("--vec_dim", type=int, default=128)
+    parser.add_argument("--vec_dim", type=int, default=64)
     parser.add_argument("--review_max_length", type=int, default=128)
     parser.add_argument("--device", type=str, default="cuda")
     args = parser.parse_args()

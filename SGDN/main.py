@@ -3,7 +3,6 @@ import json
 import numpy as np
 import os
 import random
-import string
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -197,12 +196,12 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="./", help="Directory to save results.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    parser.add_argument("--review_feat_size", type=int, default=128)
+    parser.add_argument("--review_feat_size", type=int, default=64)
     parser.add_argument("--model_activation", type=str, default="leaky")
     parser.add_argument("--num_factor", type=int, default=4)
-    parser.add_argument("--num_layer", type=int, default=1)
+    parser.add_argument("--num_layer", type=int, default=2)
     parser.add_argument("--num_pos", type=int, default=10)
-    parser.add_argument("--lamda", type=float, default=0.005)
+    parser.add_argument("--lamda", type=float, default=0.1)
 
     parser.add_argument("--gcn_agg_norm_symm", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--gcn_agg_accum", type=str, default="sum")
