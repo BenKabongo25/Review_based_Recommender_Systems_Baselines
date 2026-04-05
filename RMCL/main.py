@@ -198,8 +198,8 @@ def main():
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--num_intentions", type=int, default=20)
 
-    parser.add_argument("--epochs", type=int, default=200)
-    parser.add_argument("--early_stop_patience", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--early_stop_patience", type=int, default=100)
     parser.add_argument("--grad_clip", type=float, default=1.0)
     parser.add_argument("--weight_decay", type=float, default=0.0)
 
@@ -211,7 +211,7 @@ def main():
     parser.add_argument("--max_doc_words", type=int, default=300)
 
     args = parser.parse_args()
-    args.device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+    args.device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
     random.seed(args.seed)
     np.random.seed(args.seed)
