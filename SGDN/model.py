@@ -1,34 +1,42 @@
-import argparse
 import dgl
 import dgl.function as fn
 import dgl.nn.pytorch as dglnn
 import faiss
-import random
-import string
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from abc import ABC
 from torch.nn import init
 from torch_scatter import scatter
 
-from util import *
 
 
-class GCMCGraphConv(nn.Module, ABC):
-    """Graph convolution module used in the GCMC model.
 
-    Parameters
-    ----------
-    in_feats : int
-        Input feature size.
-    out_feats : int
-        Output feature size.
-    device: str, optional
-        Which device to put data in. Useful in mix_cpu_gpu training and
-        multi-gpu training
-    """
+def to_etype_name(rating):
+    return str(rating).replace('.', '_')
+
+
+def get_activation(act):
+    if act is None:
+        return lambda x: x
+    if isinstance(act, str):
+        if act == 'leaky':
+            return nn.LeakyReLU(0.1)
+        elif act == 'relu':
+            return nn.ReLU()
+        elif act == 'tanh':
+            return nn.Tanh()
+        elif act == 'sigmoid':
+            return nn.Sigmoid()
+        elif act == 'softsign':
+            return nn.Softsign()
+        else:
+            raise NotImplementedError
+    else:
+        return act
+
+
+class GCMCGraphConv(nn.Module):
 
     def __init__(self,
                  in_feats,
@@ -70,12 +78,12 @@ class GCMCGraphConv(nn.Module, ABC):
         return rst
 
 
-class GCMCLayer(nn.Module, ABC):
+class GCMCLayer(nn.Module):
 
     def __init__(self,
                  rating_vals,
                  user_in_units,
-                 movie_in_units,
+                 item_in_units,
                  num_rating,
                  msg_units,
                  out_units,
@@ -89,17 +97,16 @@ class GCMCLayer(nn.Module, ABC):
         self.ufc = nn.Linear(msg_units, out_units)
         self.ifc = nn.Linear(msg_units, out_units)
         self.dropout = nn.Dropout(dropout_rate)
-        self.k = k  # 第k个factor
+        self.k = k
         sub_conv = {}
         self.aggregate = aggregate  # stack or sum
         self.num_user = user_in_units
-        self.num_movie = movie_in_units
+        self.num_item = item_in_units
         self.num_factor = num_factor
         self.num_rating = num_rating
         self.eta = nn.Parameter(torch.FloatTensor(self.rating_vals[-1], self.num_rating))
 
         for rating in rating_vals:
-
             rating = to_etype_name(rating)
             rev_rating = 'rev-%s' % rating
             self.W_r = None
@@ -109,7 +116,7 @@ class GCMCLayer(nn.Module, ABC):
                                              num_factor,
                                              device=device,
                                              dropout_rate=dropout_rate)
-            sub_conv[rev_rating] = GCMCGraphConv(movie_in_units,
+            sub_conv[rev_rating] = GCMCGraphConv(item_in_units,
                                                  msg_units,
                                                  k,
                                                  num_factor,
@@ -130,8 +137,8 @@ class GCMCLayer(nn.Module, ABC):
         tau =0.5
         exp_anchor_dot = {}
 
-        num_user, num_movie = self.num_user, self.num_movie
-        norm_user_sum, norm_movie_sum = torch.zeros(num_user).to(self.device), torch.zeros(num_movie).to(self.device)
+        num_user, num_item = self.num_user, self.num_item
+        norm_user_sum, norm_item_sum = torch.zeros(num_user).to(self.device), torch.zeros(num_item).to(self.device)
         for u, e, v in graph.canonical_etypes:
             e_s, e_sum = 'h_' + e[-1], 'h_sum' + e[-1]
             rating = int(e[-1])-1
@@ -154,32 +161,32 @@ class GCMCLayer(nn.Module, ABC):
             exp_anchor_dot_k = F.sigmoid(self.eta[rating][:exp_anchor_dot_k.shape[0]])*exp_anchor_dot_k + (1-F.sigmoid(self.eta[rating][:exp_anchor_dot_k.shape[0]]))*exp_sim
             exp_anchor_dot[u+e+v] = exp_anchor_dot_k
 
-            if u == 'movie':
-                norm_movie = scatter(exp_anchor_dot_k, row, dim=0, dim_size=num_movie, reduce='sum')
+            if u == 'item':
+                norm_item = scatter(exp_anchor_dot_k, row, dim=0, dim_size=num_item, reduce='sum')
                 norm_user = scatter(exp_anchor_dot_k, col, dim=0, dim_size=num_user, reduce='sum')
             else:
                 norm_user = scatter(exp_anchor_dot_k, row, dim=0, dim_size=num_user, reduce='sum')
-                norm_movie = scatter(exp_anchor_dot_k, col, dim=0, dim_size=num_movie, reduce='sum')
+                norm_item = scatter(exp_anchor_dot_k, col, dim=0, dim_size=num_item, reduce='sum')
             norm_user_sum += norm_user
-            norm_movie_sum += norm_movie
-        norm_user_sum, norm_movie_sum = norm_user_sum/2, norm_movie_sum/2
+            norm_item_sum += norm_item
+        norm_user_sum, norm_item_sum = norm_user_sum/2, norm_item_sum/2
         int_dist = []
         for u, e, v in graph.canonical_etypes:
             exp_anchor_dot_k = exp_anchor_dot[u+e+v]
 
             row, col = graph[(u, e, v)].edges()[0].to(torch.int64), graph[(u, e, v)].edges()[1].to(torch.int64)
-            if u=='movie':
-                n_ij = torch.sqrt(norm_movie_sum[row] * norm_user_sum[col])
+            if u=='item':
+                n_ij = torch.sqrt(norm_item_sum[row] * norm_user_sum[col])
             else:
-                n_ij = torch.sqrt(norm_user_sum[row] * norm_movie_sum[col])
+                n_ij = torch.sqrt(norm_user_sum[row] * norm_item_sum[col])
 
             graph.edges[e].data['w'] = (exp_anchor_dot_k/ n_ij).unsqueeze(1)
-            if u == 'movie':
+            if u == 'item':
                 int_dist.append(graph.edges[e].data['w'])
         int_dist = torch.cat(int_dist, dim=0)
         out_feats = self.conv(graph, feat_dic[self.k])
         ufeat = out_feats['user']
-        ifeat = out_feats['movie']
+        ifeat = out_feats['item']
 
         # fc and non-linear
         ufeat = self.agg_act(ufeat)
@@ -214,7 +221,7 @@ def cal_c_loss(h_fea1, h_fea2, int_dist, rating_split, k):
     return c_loss
 
 
-class MLPPredictor(nn.Module, ABC):
+class MLPPredictor(nn.Module):
     def __init__(self,
                  in_units,
                  rating_split,
@@ -258,7 +265,7 @@ class MLPPredictor(nn.Module, ABC):
         return {'score': score, 'feat': h_fea}
 
     def forward(self, graph, ufeat, ifeat):
-        graph.nodes['movie'].data['h'] = ifeat
+        graph.nodes['item'].data['h'] = ifeat
         graph.nodes['user'].data['h'] = ufeat
 
         with graph.local_scope():
@@ -266,10 +273,10 @@ class MLPPredictor(nn.Module, ABC):
             return graph.edata['score'], graph.edata['feat']
 
 
-class Net(nn.Module, ABC):
+class SGDN(nn.Module):
 
     def __init__(self, params, num_user, num_item, review_feat_dic, num_rating, rating_split):
-        super(Net, self).__init__()
+        super(SGDN, self).__init__()
         self._act = get_activation(params.model_activation)
         self.encoders = [[] for _ in range(params.num_layer)]
         self.num_factor = params.num_factor
@@ -322,13 +329,10 @@ class Net(nn.Module, ABC):
         self.reset_parameters()
 
     def init_prot(self, review_feat_dic):
-        """Run K-means algorithm to get k clusters of the input tensor x
-                """
         prototypes, reviews = [], []
         for rating in self.rating_vals:
             rating = to_etype_name(rating)
             review_feat = review_feat_dic[rating]
-            # review_feat = review_feat.detach().cpu().numpy()
             reviews.append(review_feat)
         review_feat = torch.cat(reviews, dim=0).detach().cpu().numpy()
         kmeans = faiss.Kmeans(d=self.dim, k=self.num_factor, gpu=False)
@@ -339,6 +343,7 @@ class Net(nn.Module, ABC):
         centroids = torch.Tensor(cluster_cents).to(self.device)
         centroids = F.normalize(centroids, p=2, dim=1)
         self.prototypes.data = centroids
+
     def reset_parameters(self):
         for r in range(len(self.rating_vals)):
             for k in range(self.num_factor):
@@ -349,14 +354,15 @@ class Net(nn.Module, ABC):
         for i, rfeat in enumerate(self.rfcs):
             init.xavier_uniform_(self.rfcs[i].weight)
         init.xavier_uniform_(self.prototypes)
-    def prepare_graph(self, l, graphs, user_out, movie_out):
-        feat_dic_all = {'user': {}, 'movie': {} }
+
+    def prepare_graph(self, l, graphs, user_out, item_out):
+        feat_dic_all = {'user': {}, 'item': {} }
         user_sum, item_sum = [[] for _ in range(len(self.rating_vals))], [[] for _ in range(len(self.rating_vals))]
         for k in range(self.num_factor):
 
             graph = graphs[k]
 
-            dic = {'user': {}, 'movie': {}}
+            dic = {'user': {}, 'item': {}}
 
             for u, e, v in graph.canonical_etypes:
                 rating = int(e[-1]) - 1
@@ -370,115 +376,59 @@ class Net(nn.Module, ABC):
                 else:
                     s = 'h_' + str(rating+1)
                     if l == 0:
-                        dic['movie'][s] = self.ifeats[str(rating*len(self.rating_vals)+k)]
+                        dic['item'][s] = self.ifeats[str(rating*len(self.rating_vals)+k)]
                     else:
-                        dic['movie'][s] = movie_out[k][:, rating, :]
-                    item_sum[rating].append(dic['movie'][s].unsqueeze(1))
+                        dic['item'][s] = item_out[k][:, rating, :]
+                    item_sum[rating].append(dic['item'][s].unsqueeze(1))
             feat_dic_all[k] = dic
         for rating in range(len(self.rating_vals)):
             feat_dic_all['user']['h_sum'+str(rating+1)] = F.normalize(torch.cat(user_sum[rating], dim=1), dim=2)
-            feat_dic_all['movie']['h_sum'+str(rating+1)] = F.normalize(torch.cat(item_sum[rating], dim=1), dim=2)
+            feat_dic_all['item']['h_sum'+str(rating+1)] = F.normalize(torch.cat(item_sum[rating], dim=1), dim=2)
 
         return feat_dic_all
 
     def forward(self, enc_graphs, dec_graph, review_feat_dic, save_graph=False):
         review_dic_fact = {}
+        has_dec_review_feat = 'review_feat' in dec_graph.edata
         for rating in self.rating_vals:
             rating = to_etype_name(rating)
             review_feat = review_feat_dic[rating]
             temp = []
             for k in range(self.num_factor):
                 review_feat_k = self._modules['rfc_'+str(k)](review_feat)
-                dec_graph.edata['review_feat_'+str(k)] = self._modules['rfc_'+str(k)](dec_graph.edata['review_feat'])   # 加上dec_graph的review_feat
+                if has_dec_review_feat:
+                    dec_graph.edata['review_feat_'+str(k)] = self._modules['rfc_'+str(k)](dec_graph.edata['review_feat'])
                 temp.append(review_feat_k.unsqueeze(1))
             review_dic_fact[rating] = torch.cat(temp, dim=1)
 
         user_emb, item_emb, int_dists, feat_dic_all = [], [], [], {}
-        user_out, movie_out, user_out_all, movie_out_all = [None for _ in range(self.num_factor)], [None for _ in range(
+        user_out, item_out, user_out_all, item_out_all = [None for _ in range(self.num_factor)], [None for _ in range(
             self.num_factor)], [torch.zeros(self.num_user, self.dim//self.num_factor).to(self.device) for _
                                                             in range(self.num_factor)],[torch.zeros(self.num_item, self.dim//self.num_factor).to(self.device) for _
                                                             in range(self.num_factor)]
         for l in range(self.num_layer):
-            feat_dic_all = self.prepare_graph(l, enc_graphs, user_out, movie_out)
+            feat_dic_all = self.prepare_graph(l, enc_graphs, user_out, item_out)
             for k in range(self.num_factor):
-                user_out[k], movie_out[k], int_dist = self._modules['encoder_'+str(l*self.num_factor+k)](enc_graphs[k], self.prototypes, review_dic_fact, self.ufeats, self.ifeats, feat_dic_all)
+                user_out[k], item_out[k], int_dist = self._modules['encoder_'+str(l*self.num_factor+k)](enc_graphs[k], self.prototypes, review_dic_fact, self.ufeats, self.ifeats, feat_dic_all)
                 if l !=self.num_layer-1:
                     user_out_all[k] += torch.sum(user_out[k], dim=1) * (1.0/(self.num_layer))
-                    movie_out_all[k] += torch.sum(movie_out[k], dim=1) * (1.0 / (self.num_layer))
+                    item_out_all[k] += torch.sum(item_out[k], dim=1) * (1.0 / (self.num_layer))
                 else:
                     user_out_all[k] += user_out[k] * (1.0 / (self.num_layer))
-                    movie_out_all[k] += movie_out[k] * (1.0 / (self.num_layer))
+                    item_out_all[k] += item_out[k] * (1.0 / (self.num_layer))
                     int_dists.append(int_dist)
         int_dists = torch.cat(int_dists, dim=1)
 
         for k in range(self.num_factor):
             user_emb.append(user_out_all[k])
-            item_emb.append(movie_out_all[k])
+            item_emb.append(item_out_all[k])
             if k == 0:
-                user_out, movie_out = user_out_all[k], movie_out_all[k]
+                user_out, item_out = user_out_all[k], item_out_all[k]
             else:
                 user_out = torch.cat([user_out, user_out_all[k]], dim=1)
-                movie_out = torch.cat([movie_out, movie_out_all[k]], dim=1)
+                item_out = torch.cat([item_out, item_out_all[k]], dim=1)
 
-
-        pred_ratings, h_fea = self.decoder(dec_graph, user_out, movie_out)
+        pred_ratings, h_fea = self.decoder(dec_graph, user_out, item_out)
         pred_ratings = pred_ratings.squeeze()
 
-        if save_graph:
-            for k in range(self.num_factor):
-                dgl.save_graphs('data/'+config_args.dataset_name+'/graph_'+str(k)+'.dgl', enc_graphs[k])
-
-        return pred_ratings, h_fea, int_dists, user_emb, item_emb, user_out, movie_out
-
-    parser = argparse.ArgumentParser(description='RGC')
-    parser.add_argument('--device', default='0', type=int,
-                        help='Running device. E.g `--device 0`, if using cpu, set `--device -1`')
-    parser.add_argument('--model_save_path', type=str, help='The model saving path')
-    parser.add_argument('--model_activation', type=str, default="leaky")
-    parser.add_argument('--review_feat_size', type=int, default=64)
-    parser.add_argument('--gcn_agg_norm_symm', type=bool, default=True)
-    parser.add_argument('--gcn_agg_accum', type=str, default="sum")
-    parser.add_argument('--batch_size', type=int, default=2048)
-    parser.add_argument('--gcn_dropout', type=float, default=0.8)
-    parser.add_argument('--train_max_iter', type=int, default=2000)
-    parser.add_argument('--train_log_interval', type=int, default=1)
-    parser.add_argument('--train_valid_interval', type=int, default=1)
-    parser.add_argument('--train_optimizer', type=str, default="Adam")
-    parser.add_argument('--train_grad_clip', type=float, default=1.0)
-    parser.add_argument('--train_lr', type=float, default=0.01)
-    parser.add_argument('--train_min_lr', type=float, default=0.001)
-    parser.add_argument('--train_lr_decay_factor', type=float, default=0.5)
-    parser.add_argument('--train_decay_patience', type=int, default=50)
-    parser.add_argument('--train_early_stopping_patience', type=int, default=100)
-    parser.add_argument('--share_param', default=False, action='store_true')
-    parser.add_argument('--train_classification', type=bool, default=False)
-    parser.add_argument('--num_factor', type=int, default=2)
-    parser.add_argument('--num_layer', type=int, default=1)
-    parser.add_argument('--num_pos', type=int, default=10)
-    parser.add_argument('--lamda', type=float, default=0.005)
-
-
-    args = parser.parse_args()
-    args.model_short_name = 'SGDN'
-
-    args.dataset_name = 'Office_Products_5'
-    args.dataset_path = '/home/ryy/code/GNN/ReviewGraph/data/' + args.dataset_name + '/' + args.dataset_name + '.json'
-    args.train_max_iter = 2000
-
-
-    args.device = torch.device(args.device) if args.device >= 0 else torch.device('cpu')
-
-    # configure save_fir to save all the info
-    if args.model_save_path is None:
-        args.model_save_path = 'log/' \
-                               + args.model_short_name \
-                               + '_' + args.dataset_name \
-                               + '_' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=2)) \
-                               + '.pkl'
-    if not os.path.isdir('log'):
-        os.makedirs('log')
-
-    args.gcn_agg_units = args.review_feat_size*1
-    args.gcn_out_units = args.review_feat_size*1
-
-    train(args)
+        return pred_ratings, h_fea, int_dists, user_emb, item_emb, user_out, item_out

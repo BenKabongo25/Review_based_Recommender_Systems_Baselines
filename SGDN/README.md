@@ -1,2 +1,1 @@
-# SGDN
-Self-supervised Graph Disentangled Networks for Review-based Recommendation
+# SGDN (Self-supervised Graph Disentangled Networks for Review-based Recommendation)
