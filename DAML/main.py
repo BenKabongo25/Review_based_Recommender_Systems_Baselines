@@ -150,7 +150,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--num_epochs", type=int, default=500)
     parser.add_argument("--early_stopping_patience", type=int, default=100)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=0.002)
 
     parser.add_argument("--word_dim", type=int, default=300)
